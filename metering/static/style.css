@@ -1469,3 +1469,129 @@ footer {
 .sql-connection-row select {
   min-height: 38px;
 }
+.monthly-range,
+.monthly-actions {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin: 20px 0;
+}
+.monthly-range label {
+  display: grid;
+  gap: 8px;
+}
+.monthly-range input {
+  min-width: 170px;
+}
+.monthly-plan-table input {
+  width: 120px;
+  min-height: 38px;
+}
+.monthly-plan-table select {
+  min-height: 38px;
+}
+.monthly-plan-table td {
+  vertical-align: top;
+}
+.monthly-service {
+  min-width: 200px;
+  max-width: 320px;
+}
+.monthly-service summary {
+  cursor: pointer;
+  color: #a2b68e;
+  padding: 10px 0;
+}
+.monthly-service .form-grid {
+  margin: 12px 0;
+  min-width: 280px;
+}
+.monthly-stats {
+  margin-top: 30px;
+}
+.monthly-stats .stat-card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  padding: 23px 22px;
+  min-width: 0;
+  box-shadow: var(--shadow);
+}
+.monthly-stats .stat-card:first-child {
+  background: #eaf0df;
+  border-color: #e1e9d6;
+}
+.monthly-stats .stat-card p {
+  color: #7d8a75;
+  font-size: 11px;
+  margin-bottom: 18px;
+}
+.monthly-stats .stat-card > strong {
+  display: block;
+  font-size: clamp(21px, 2vw, 29px);
+  letter-spacing: -1px;
+  font-weight: 550;
+  white-space: nowrap;
+}
+.monthly-stats .stat-card > small {
+  display: block;
+  color: #9ba492;
+  margin-top: 12px;
+  font-size: 9px;
+}
+.monthly-cost-bars {
+  display: flex;
+  gap: 14px;
+  min-height: 230px;
+  overflow-x: auto;
+  align-items: end;
+  padding: 15px 0;
+}
+.monthly-cost-column {
+  flex: 1;
+  min-width: 65px;
+  text-align: center;
+}
+.monthly-cost-column > span {
+  display: block;
+  font-size: 10px;
+  margin-bottom: 9px;
+}
+.monthly-cost-column small {
+  display: block;
+  font-size: 10px;
+  margin-top: 12px;
+}
+.monthly-cost-track {
+  height: 150px;
+  display: flex;
+  align-items: end;
+  justify-content: center;
+}
+.monthly-cost-track i {
+  display: block;
+  width: 70%;
+  background: #96af76;
+  border-radius: 4px 4px 0 0;
+}
+.monthly-cost-track i.provisional {
+  background: #9a815c;
+}
+.monthly-detail {
+  margin: 20px 0;
+}
+dialog.monthly-bill-dialog {
+  max-width: 1150px;
+}
+#monthly-results > .empty {
+  margin: 30px 0;
+}
+@media (max-width: 560px) {
+  .monthly-range label {
+    width: 100%;
+  }
+  .monthly-actions button {
+    width: 100%;
+  }
+}

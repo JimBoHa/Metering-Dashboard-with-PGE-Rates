@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -25,6 +26,7 @@ from .security import Security, COOKIE, password_hash, verify
 from .sql_secrets import SqlSecrets
 from .sql_trends import SqlTrends
 from .sql_api import router as sql_router
+from .monthly_api import router as monthly_router
 from . import __version__
 
 class ConfigUpdate(BaseModel):
@@ -53,9 +55,11 @@ def create_app(directory=None,background=True,sql_connector=None,auth_required=N
     async def rates_loop():
         while True:
             cfg=store.config();sync=store.get("rate_sync",{})
-            if cfg.rate.schedule and time.time()-sync.get("last_attempt",0)>86400:
-                store.set("rate_sync",{**sync,"last_attempt":time.time()})
-                try:await fetch_tariff(store,cfg.rate)
+            month=datetime.now(ZoneInfo("America/Los_Angeles")).strftime("%Y-%m")
+            selection=next((r.selection for r in cfg.monthly_rates if r.month==month),cfg.rate)
+            if selection.schedule and (time.time()-sync.get("last_attempt",0)>86400 or sync.get("selection")!=selection.model_dump()):
+                store.set("rate_sync",{**sync,"last_attempt":time.time(),"selection":selection.model_dump()})
+                try:await fetch_tariff(store,selection)
                 except Exception as e:store.set("rate_sync",{**store.get("rate_sync",{}),"last_attempt":time.time(),"error":str(e)[:500]})
             await asyncio.sleep(60)
     @asynccontextmanager
@@ -139,6 +143,7 @@ def create_app(directory=None,background=True,sql_connector=None,auth_required=N
     @app.put("/api/config")
     def save_config(body:ConfigUpdate):return save_configuration(body.configuration,body.revision)
     app.include_router(sql_router(store,sql,save_configuration))
+    app.include_router(monthly_router(store,job_tasks))
     @app.get("/api/status")
     def status():return {"collector":{**collector.status,**sql.status},"sql_jobs":sql.list_jobs(),"last_poll":collector.last_poll,"latest":store.latest(),"rate_sync":store.get("rate_sync",{}),"tariffs":store.tariffs()}
     @app.post("/api/discover")

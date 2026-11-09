@@ -148,6 +148,7 @@ async function load() {
   renderRates();
   renderSettings();
   renderExpenses();
+  renderMonthlyPlan();
   await runReport();
   renderExpenses();
   renderMeters();
@@ -169,6 +170,11 @@ const pages = {
     "THE BIG PICTURE",
     "Utility overview",
     "One workspace for every meter, system and shared cost.",
+  ],
+  monthly: [
+    "MONTH BY MONTH",
+    "Monthly billing",
+    "Historical usage, the right rate schedule and a bill for each month.",
   ],
   meters: [
     "YOUR MEASUREMENT NETWORK",
@@ -217,6 +223,7 @@ function navigate(page) {
   $("breadcrumb").innerHTML = `Workspace <span>/ ${escape(info[1])}</span>`;
   if (page === "canvas") renderCanvas();
   if (page === "settings") loadAudit();
+  if (page === "monthly") loadMonthlyImportStatus();
   history.replaceState(null, "", "#" + page);
 }
 function meterStatus(m) {
@@ -439,7 +446,8 @@ function renderMeters() {
     .querySelectorAll(".edit-meter")
     .forEach((b) => (b.onclick = () => editMeter(b.dataset.id)));
 }
-function dialog(title, body) {
+function dialog(title, body, className = "") {
+  $("editor").className = className;
   $("editor-title").textContent = title;
   $("editor-body").innerHTML = body;
   if (!$("editor").open) $("editor").showModal();
@@ -1471,13 +1479,15 @@ $("report-start").value = dateStr(
 $("report-end").value = dateStr(
   new Date(now.getFullYear(), now.getMonth() + 1, 1),
 );
-api("/api/session")
-  .then(async (s) => {
-    useSession(s);
-    await load();
-    navigate(location.hash.slice(1) || "overview");
-  })
-  .catch(() => showLogin());
+document.addEventListener("DOMContentLoaded", () => {
+  api("/api/session")
+    .then(async (s) => {
+      useSession(s);
+      await load();
+      navigate(location.hash.slice(1) || "overview");
+    })
+    .catch(() => showLogin());
+});
 setInterval(async () => {
   if (!state.csrf || $("editor").open || document.hidden) return;
   try {

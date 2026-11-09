@@ -1,13 +1,18 @@
 """Fetch PG&E-published workbooks at runtime. No tariff prices ship with the code."""
 from __future__ import annotations
 import hashlib
+import asyncio
 import io
+import json
+import os
+import tempfile
 import re
 import time
 from datetime import datetime, timedelta
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlparse, parse_qs
 from zoneinfo import ZoneInfo
+from .periods import months_between
 import httpx
 import openpyxl
 
@@ -195,23 +200,94 @@ def parse_workbook(content, selection, entry):
     return {"selection":{**selection.model_dump(),"schedule":schedule},"effective_from":entry["effective_from"],"effective_to":entry["effective_to"],"energy":energy,"demand":demand,"customer_daily":customer,"source_url":entry["url"],"index_url":INDEX,"source_label":entry["label"],"sheet":sheet.title,"cells":provenance,"source_sha256":hashlib.sha256(content).hexdigest(),"fetched_at":time.time(),"time_definition_url":f"https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_{schedule}.pdf"}
 
 
+def retain_tariff(store,content,selection,entry,data=None):
+    data=data if data is not None else parse_workbook(content,selection,entry)
+    data["id"]=hashlib.sha256((data["source_sha256"]+json.dumps(data["selection"],sort_keys=True)+data["effective_from"]).encode()).hexdigest()[:24]
+    directory=store.directory/"tariff-sources";directory.mkdir(exist_ok=True,mode=0o700)
+    path=directory/(data["source_sha256"]+".xlsx")
+    if not path.exists() or hashlib.sha256(path.read_bytes()).hexdigest()!=data["source_sha256"]:
+        with tempfile.NamedTemporaryFile(dir=directory,delete=False) as temporary:
+            temporary.write(content);temporary.flush();os.fsync(temporary.fileno())
+        os.replace(temporary.name,path)
+    os.chmod(path,0o600)
+    store.save_tariff(data)
+    store.audit("tariff.import",{"tariff_id":data["id"],"source_url":entry["url"]})
+    return data
+
+
+def reconcile_catalog(store,entries):
+    # "Present" can acquire an end date when PG&E publishes a new version.
+    for tariff in store.tariffs():
+        entry=next((e for e in entries if e["url"]==tariff.get("source_url") and e["effective_from"]==tariff["effective_from"]),None)
+        if entry and tariff.get("effective_to")!=entry["effective_to"]:
+            store.save_tariff({**tariff,"effective_to":entry["effective_to"]})
+
+
 async def fetch_tariff(store, selection):
     schedule=normalize_schedule(selection.schedule)
     selection=selection.model_copy(update={"schedule":schedule})
     entries=catalog((await download(INDEX)).decode("utf-8"))
+    reconcile_catalog(store,entries)
     group="industrial" if schedule=="B-20" else "commercial"
     today=datetime.now(ZoneInfo("America/Los_Angeles")).date().isoformat()
     options=[e for e in entries if e["group"]==group and e["effective_from"]<=today and (not e["effective_to"] or e["effective_to"]>today)]
     if not options:raise ValueError("No currently effective official workbook found")
     entry=max(options,key=lambda e:e["effective_from"])
     content=await download(entry["url"])
-    data=parse_workbook(content,selection,entry)
-    import json,os
-    data["id"]=hashlib.sha256((data["source_sha256"]+json.dumps(data["selection"],sort_keys=True)+data["effective_from"]).encode()).hexdigest()[:24]
-    directory=store.directory/"tariff-sources";directory.mkdir(exist_ok=True,mode=0o700)
-    path=directory/(data["source_sha256"]+".xlsx")
-    path.write_bytes(content);os.chmod(path,0o600)
-    store.save_tariff(data)
-    store.set("rate_sync",{"last_success":time.time(),"last_attempt":time.time(),"error":None,"tariff_id":data["id"]})
-    store.audit("tariff.import",{"tariff_id":data["id"],"source_url":entry["url"]})
+    parsed=await asyncio.to_thread(parse_workbook,content,selection,entry)
+    data=retain_tariff(store,content,selection,entry,parsed)
+    store.set("rate_sync",{"last_success":time.time(),"last_attempt":time.time(),"error":None,"tariff_id":data["id"],"selection":selection.model_dump()})
     return data
+
+
+async def fetch_tariff_history(store,config,start_month,end_month,progress=None):
+    """Import only official effective versions overlapping explicitly assigned months."""
+    from .billing import rate_coverage
+    periods=months_between(start_month,end_month)
+    assigned={r.month:r.selection for r in config.monthly_rates}
+    if not any(a.strftime("%Y-%m") in assigned for a,b in periods):
+        raise ValueError("Save at least one monthly rate schedule before fetching historical rates")
+    entries=catalog((await download(INDEX)).decode("utf-8"));reconcile_catalog(store,entries)
+    needed={}
+    for a,b in periods:
+        selection=assigned.get(a.strftime("%Y-%m"))
+        if not selection:continue
+        group="industrial" if selection.schedule=="B-20" else "commercial"
+        for entry in entries:
+            if entry["group"]!=group or entry["effective_from"]>=b.isoformat() or (entry["effective_to"] and entry["effective_to"]<=a.isoformat()):continue
+            key=(entry["url"],entry["effective_from"],entry["effective_to"])
+            item=needed.setdefault(key,{"entry":entry,"selections":{}})
+            item["selections"][json.dumps(selection.model_dump(),sort_keys=True)]=selection
+    total=sum(len(item["selections"]) for item in needed.values())
+    if total>180:raise ValueError("This request needs too many tariff combinations; import a shorter range")
+    processed=0;imported=[];errors=[]
+    def update(active=""):
+        if progress:progress({"processed":processed,"total":total,"imported":len(imported),"errors":list(errors),"active":active})
+    update()
+    for item in sorted(needed.values(),key=lambda x:(x["entry"]["effective_from"],x["entry"]["group"])):
+        entry=item["entry"];content=None
+        update(entry["label"])
+        try:
+            if entry["effective_to"]:
+                for saved in store.tariffs():
+                    if saved.get("source_url")!=entry["url"] or saved["effective_from"]!=entry["effective_from"]:continue
+                    digest=saved.get("source_sha256","")
+                    if not re.fullmatch(r"[a-f0-9]{64}",digest):continue
+                    path=store.directory/"tariff-sources"/(digest+".xlsx")
+                    if path.is_file():
+                        cached=path.read_bytes()
+                        if hashlib.sha256(cached).hexdigest()==digest:content=cached;break
+            if content is None:content=await download(entry["url"])
+        except Exception as e:
+            errors.append({"source":entry["label"],"error":str(e)[:500]});processed+=len(item["selections"]);update();continue
+        for selection in item["selections"].values():
+            try:
+                parsed=await asyncio.to_thread(parse_workbook,content,selection,entry)
+                data=retain_tariff(store,content,selection,entry,parsed);imported.append(data["id"])
+            except Exception as e:errors.append({"source":entry["label"],"schedule":selection.schedule,"option":selection.option,"error":str(e)[:500]})
+            processed+=1;update(entry["label"])
+    tariffs=store.tariffs();coverage=[]
+    for a,b in periods:
+        month=a.strftime("%Y-%m");selection=assigned.get(month)
+        coverage.append({"month":month,"assigned":selection is not None,**rate_coverage(selection.model_dump() if selection else None,a,b,tariffs)})
+    return {"tariff_ids":sorted(set(imported)),"errors":errors,"coverage":coverage,"complete":not errors and all(c["complete"] for c in coverage)}

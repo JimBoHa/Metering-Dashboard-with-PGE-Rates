@@ -64,5 +64,5 @@ class Store:
         return [json.loads(r[0]) for r in rows]
     def save_tariff(self, data):
         with self.lock,self.db:
-            self.db.execute("INSERT OR IGNORE INTO tariffs VALUES(?,?,?)", (data["id"],data["fetched_at"],json.dumps(data)))
+            self.db.execute("INSERT INTO tariffs VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET fetched_at=excluded.fetched_at,data=excluded.data", (data["id"],data["fetched_at"],json.dumps(data)))
     def close(self): self.db.close()

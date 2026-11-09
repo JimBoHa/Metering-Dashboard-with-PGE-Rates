@@ -7,6 +7,7 @@ from datetime import datetime, time as daytime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from zoneinfo import ZoneInfo
 from .rates import period_at
+from .periods import months_between, PGE_ZONE
 
 
 def local_midnight(day, zone):
@@ -18,11 +19,15 @@ def money(n):
 
 
 class Accounting:
-    def __init__(self, store, config=None):
+    def __init__(self, store, config=None, require_monthly_rates=False):
         self.store = store
         self.config = config or store.config()
         self.meters = {m.id:m for m in self.config.meters}
         self.cache = {}
+        self.require_monthly_rates=require_monthly_rates
+        self.monthly_selections={r.month:r.selection.model_dump() for r in self.config.monthly_rates}
+        self.tariff_cache={}
+        self._tariffs=None
 
     def segments(self, mid, start, end):
         key = (mid,start,end)
@@ -103,10 +108,13 @@ class Accounting:
         return {"quantity":q,"coverage":min(1,covered/(end-start)),"issues":sorted(issues)}
 
     def tariff_for(self, timestamp, tariffs):
-        d=datetime.fromtimestamp(timestamp,ZoneInfo("America/Los_Angeles")).date().isoformat()
-        selection=self.config.rate.model_dump()
-        candidates=[t for t in tariffs if t["selection"]==selection and t["effective_from"]<=d and (not t.get("effective_to") or d<t["effective_to"])]
-        return max(candidates,key=lambda t:(t["effective_from"],t["fetched_at"])) if candidates else None
+        if self._tariffs is not tariffs:self.tariff_cache.clear();self._tariffs=tariffs
+        d=datetime.fromtimestamp(timestamp,ZoneInfo(PGE_ZONE)).date().isoformat()
+        if d not in self.tariff_cache:
+            selection=self.monthly_selections.get(d[:7])
+            if selection is None and not self.require_monthly_rates:selection=self.config.rate.model_dump()
+            self.tariff_cache[d]=applicable_tariff(d,selection,tariffs)
+        return self.tariff_cache[d]
 
     def electricity(self, mid,start,end,tariffs):
         m=self.meters[mid]
@@ -141,7 +149,8 @@ class Accounting:
         demand_cost,fixed_cost=0.,0.
         demand_lines=[]
         full=self.usage(mid,start,end)["coverage"]>=0.999999
-        if m.electricity_charges=="account" and whole_month and full and len(used)==1 and not unpriced_seconds:
+        account_complete=m.electricity_charges!="account" or (whole_month and full and len(used)==1 and not unpriced_seconds)
+        if m.electricity_charges=="account" and account_complete:
             tariff=next(iter(used.values()))
             for charge in tariff.get("demand",[]):
                 eligible=[]
@@ -166,7 +175,7 @@ class Accounting:
         if m.electricity_charges=="account" and len(used)>1: notes.append("Tariff changed during period; demand and fixed charges require invoice reconciliation")
         if not full: notes.append("Incomplete readings: charges are estimates; demand and fixed charges excluded")
         if unpriced_seconds: notes.append("Some usage has no applicable imported tariff")
-        return {"energy_cost":total,"demand_cost":demand_cost,"fixed_cost":fixed_cost,"base_cost":total+demand_cost+fixed_cost,"unpriced_quantity":unpriced,"unpriced_seconds":unpriced_seconds,"periods":breakdown,"demand":demand_lines,"notes":notes,"tariff_ids":list(used)}
+        return {"energy_cost":total,"demand_cost":demand_cost,"fixed_cost":fixed_cost,"base_cost":total+demand_cost+fixed_cost,"unpriced_quantity":unpriced,"unpriced_seconds":unpriced_seconds,"periods":breakdown,"demand":demand_lines,"notes":notes,"tariff_ids":list(used),"account_complete":account_complete}
 
     def allocate_expense(self,e):
         start=local_midnight(e.period_start,self.config.timezone)
@@ -191,16 +200,20 @@ class Accounting:
         for r,share in zip(rows,shares):r["share"]=r["basis"]/denominator;r["base_cost"]=share/100
         return {"expense_id":e.id,"amount":e.amount,"allocated":True,"unit_cost":e.amount/denominator,"unit":next(iter(units)),"rows":rows,"issues":[]}
 
-    def report(self,start,end):
+    def report(self,start,end,tariffs=None,expenses=None):
         from .models import Expense
-        tariffs=self.store.tariffs();latest=self.store.latest();rows=[]
+        tariffs=self.store.tariffs() if tariffs is None else tariffs
+        latest=self.store.latest();rows=[]
         for m in self.config.meters:
             u=self.usage(m.id,start,end)
             electrical=self.electricity(m.id,start,end,tariffs) if m.unit=="kWh" and m.billable else None
+            if electrical:
+                for key in ("energy_cost","demand_cost","fixed_cost"):electrical[key]=money(electrical[key])
+                electrical["base_cost"]=money(sum(electrical[key] for key in ("energy_cost","demand_cost","fixed_cost")))
             rows.append({"meter_id":m.id,"name":m.name,"category":m.category,"unit":m.unit,"billable":m.billable,**u,"latest":latest.get(m.id),"electricity":electrical,"expense_cost":0.})
             self.cache.clear()
         allocations=[];byid={r["meter_id"]:r for r in rows};notes=[]
-        for data in self.store.expenses():
+        for data in self.store.expenses() if expenses is None else expenses:
             e=Expense.model_validate(data)
             es,ee=local_midnight(e.period_start,self.config.timezone),local_midnight(e.period_end,self.config.timezone)
             if es>=start and ee<=end:
@@ -211,10 +224,52 @@ class Accounting:
             elif es<end and ee>start: notes.append(f"{e.description}: bill period extends beyond report; choose its full period to allocate")
         for r in rows:
             m=self.meters[r["meter_id"]]
-            r["base_cost"]=(r["electricity"]["base_cost"] if r["electricity"] else 0)+r["expense_cost"]
+            r["base_cost"]=money((r["electricity"]["base_cost"] if r["electricity"] else 0)+r["expense_cost"])
             pct=m.markup_percent if m.markup_percent is not None else self.config.markup_percent
             r["markup_percent"]=pct;r["markup"]=money(r["base_cost"]*pct/100)
-            r["total_cost"]=money(r["base_cost"])+r["markup"]
+            r["total_cost"]=money(r["base_cost"]+r["markup"])
         # Only explicitly selected billing meters contribute energy charges. Expense rows
         # contribute their allocated share independently of the energy-billing flag.
-        return {"start":start,"end":end,"timezone":self.config.timezone,"meters":rows,"allocations":allocations,"notes":notes,"total_cost":money(sum(r["total_cost"] for r in rows)),"base_cost":money(sum(r["base_cost"] for r in rows)),"markup":money(sum(r["markup"] for r in rows)),"complete":all(r["coverage"]>=0.999999 and r["quantity"]>=0 for r in rows if r["billable"]) and all(a["allocated"] for a in allocations) and all(not r["electricity"] or not r["electricity"]["unpriced_seconds"] for r in rows)}
+        return {"start":start,"end":end,"timezone":self.config.timezone,"meters":rows,"allocations":allocations,"notes":notes,"total_cost":money(sum(r["total_cost"] for r in rows)),"base_cost":money(sum(r["base_cost"] for r in rows)),"markup":money(sum(r["markup"] for r in rows)),"complete":not notes and all(r["coverage"]>=0.999999 and r["quantity"]>=0 for r in rows if r["billable"]) and all(a["allocated"] for a in allocations) and all(not r["electricity"] or (not r["electricity"]["unpriced_seconds"] and r["electricity"]["account_complete"]) for r in rows)}
+
+    def monthly_report(self,start_month,end_month):
+        periods=months_between(start_month,end_month)
+        cfg=self.config.model_copy(update={"timezone":PGE_ZONE})
+        selections={r.month:r.selection.model_dump() for r in cfg.monthly_rates}
+        tariffs=self.store.tariffs();expenses=self.store.expenses();months=[]
+        for a,b in periods:
+            month=a.strftime("%Y-%m");selection=selections.get(month)
+            accounting=Accounting(self.store,cfg,require_monthly_rates=True)
+            report=accounting.report(local_midnight(a,PGE_ZONE),local_midnight(b,PGE_ZONE),tariffs,expenses)
+            electrical=[r["electricity"] for r in report["meters"] if r["electricity"]]
+            coverage=rate_coverage(selection,a,b,tariffs)
+            if electrical and selection is None:report["notes"].append("Assign the rate schedule for this month; the current schedule is not substituted")
+            if electrical and not coverage["complete"]:report["notes"].append("Historical PG&E rates do not cover this whole month")
+            if not electrical and not report["allocations"]:report["notes"].append("No electricity billing meters or allocated bills selected for this month")
+            report["complete"]=report["complete"] and not report["notes"] and (not electrical or coverage["complete"])
+            months.append({"month":month,"period_start":a.isoformat(),"period_end":b.isoformat(),"selection":selection,"rate_coverage":coverage,**report,
+                "electricity_kwh":sum(r["quantity"] for r in report["meters"] if r["electricity"]),
+                "energy_cost":money(sum(e["energy_cost"] for e in electrical)),"demand_cost":money(sum(e["demand_cost"] for e in electrical)),
+                "fixed_cost":money(sum(e["fixed_cost"] for e in electrical)),"expense_cost":money(sum(r["expense_cost"] for r in report["meters"])),
+                "unpriced_quantity":sum(e["unpriced_quantity"] for e in electrical)})
+        totals={key:money(sum(m[key] for m in months)) for key in ("energy_cost","demand_cost","fixed_cost","expense_cost","base_cost","markup","total_cost")}
+        return {"start_month":start_month,"end_month":end_month,"timezone":PGE_ZONE,"months":months,"totals":totals,"complete":all(m["complete"] for m in months),"complete_months":sum(m["complete"] for m in months),"calculated_at":datetime.now(timezone.utc).timestamp()}
+
+
+def applicable_tariff(day,selection,tariffs):
+    if selection is None:return None
+    candidates=[t for t in tariffs if t["selection"]==selection and t["effective_from"]<=day]
+    if not candidates:return None
+    # An expired later version must not fall back to an older open-ended version.
+    tariff=max(candidates,key=lambda t:(t["effective_from"],t["fetched_at"]))
+    return tariff if not tariff.get("effective_to") or day<tariff["effective_to"] else None
+
+
+def rate_coverage(selection,start,end,tariffs):
+    days=[];used=set();missing=[];day=start
+    while day<end:
+        tariff=applicable_tariff(day.isoformat(),selection,tariffs)
+        if tariff:used.add(tariff["id"]);days.append(day.isoformat())
+        else:missing.append(day.isoformat())
+        day+=timedelta(days=1)
+    return {"covered_days":len(days),"total_days":(end-start).days,"complete":not missing,"missing_dates":missing,"tariff_ids":sorted(used)}

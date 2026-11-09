@@ -11,6 +11,7 @@
     <link rel="stylesheet" href="/static/style.css" />
     <script src="/static/app.js" defer></script>
     <script src="/static/sql.js" defer></script>
+    <script src="/static/monthly.js" defer></script>
   </head>
   <body>
     <div id="login-view" class="login-shell" hidden>
@@ -60,6 +61,8 @@
         <nav aria-label="Main navigation">
           <button data-page="overview" class="nav active">
             <span>◫</span> Overview</button
+          ><button data-page="monthly" class="nav">
+            <span>▦</span> Monthly billing</button
           ><button data-page="meters" class="nav">
             <span>◉</span> Meter inventory</button
           ><button data-page="canvas" class="nav">
@@ -174,6 +177,82 @@
                 </table>
               </div>
             </article>
+          </section>
+          <section id="page-monthly" class="page" hidden>
+            <article class="panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">HISTORICAL BILLING</p>
+                  <h2>A schedule for every month</h2>
+                </div>
+                <span class="tag">PG&E Pacific time</span>
+              </div>
+              <div class="monthly-range">
+                <label
+                  >From month<input id="monthly-from" type="month" required
+                /></label>
+                <label
+                  >Through month (inclusive)<input
+                    id="monthly-through"
+                    type="month"
+                    required
+                /></label>
+                <button id="monthly-load" class="secondary small">
+                  Load months
+                </button>
+                <button id="monthly-copy" class="secondary small">
+                  Copy first month to all
+                </button>
+              </div>
+              <p class="form-help">
+                Enter the schedule and service details from each month's bill.
+                Import trend history in Meter inventory or Sources &amp;
+                discovery, then fetch the historical PG&E rates and calculate.
+                Counter and power trends need a boundary sample before the first
+                month and at or after the following month begins. Up to 36
+                calendar months per report.
+              </p>
+              <datalist id="monthly-schedules">
+                <option value="B-6"></option>
+                <option value="B-19"></option>
+                <option value="B-20"></option>
+              </datalist>
+              <div class="table-scroll">
+                <table class="monthly-plan-table">
+                  <thead>
+                    <tr>
+                      <th>Billing month</th>
+                      <th>Rate schedule</th>
+                      <th>Option</th>
+                      <th>Service details</th>
+                      <th>Historical rate coverage</th>
+                    </tr>
+                  </thead>
+                  <tbody id="monthly-plan"></tbody>
+                </table>
+              </div>
+              <div class="monthly-actions">
+                <button id="monthly-save" class="secondary">
+                  Save monthly schedules
+                </button>
+                <button id="monthly-fetch" class="secondary">
+                  Fetch historical PG&E rates ↗
+                </button>
+                <button id="monthly-calculate" class="primary">
+                  Calculate monthly bills
+                </button>
+              </div>
+              <p id="monthly-save-status" class="form-help" role="status"></p>
+              <div id="monthly-import-status" role="status"></div>
+              <p class="form-help">
+                Historical bills use these explicit monthly assignments. Today's
+                schedule and prices are never substituted for a missing month.
+                Automatic import supports bundled B-6, B-19 and B-20; other
+                schedules and CCA delivery prices need a verified importer.
+                Markup uses the current workspace or meter setting.
+              </p>
+            </article>
+            <div id="monthly-results" aria-live="polite"></div>
           </section>
           <section id="page-meters" class="page" hidden>
             <div class="toolbar">

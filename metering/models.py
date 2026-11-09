@@ -59,6 +59,17 @@ class RateSelection(Model):
     customer_class: Literal["mandatory", "voluntary"] = "mandatory"
     phase: Literal["single", "poly"] = "poly"
 
+class MonthlyRate(Model):
+    month: str
+    selection: RateSelection
+    @model_validator(mode="after")
+    def valid_month(self):
+        from .periods import month_date
+        from .rates import normalize_schedule
+        month_date(self.month)
+        self.selection.schedule=normalize_schedule(self.selection.schedule)
+        return self
+
 class Configuration(Model):
     timezone: str = "America/Los_Angeles"
     markup_percent: float = Field(default=0, ge=0, le=1000)
@@ -66,9 +77,12 @@ class Configuration(Model):
     sources: list[Source] = Field(default_factory=list, max_length=100)
     meters: list[Meter] = Field(default_factory=list, max_length=500)
     rate: RateSelection = Field(default_factory=RateSelection)
+    monthly_rates: list[MonthlyRate] = Field(default_factory=list, max_length=1200)
     @model_validator(mode="after")
     def validate_graph(self):
         ZoneInfo(self.timezone)
+        if len({r.month for r in self.monthly_rates})!=len(self.monthly_rates):
+            raise ValueError("Each billing month must have only one rate schedule assignment")
         meters = {m.id: m for m in self.meters}
         sources = {s.id for s in self.sources}
         if len(meters) != len(self.meters) or len(sources) != len(self.sources):

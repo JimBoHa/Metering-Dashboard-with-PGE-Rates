@@ -24,6 +24,8 @@ When account-level charges are selected, demand and daily customer charges are c
 
 Imported source versions retain their effective ranges and checksum. Changing a meter scale, formula, billing selection or markup recalculates reports using the current configuration. Archive configuration and exported worksheets when finalizing a bill. Reports are estimates; this application does not issue or settle payments.
 
+The [monthly historical billing workflow](monthly-billing.md) saves an explicit rate selection for each calendar month and imports archived effective versions. It calculates each month's demand and fixed charges independently, then sums the monthly bills. Missing schedules or tariff coverage remain provisional. Monthly boundaries use PG&E Pacific time even if Overview uses another workspace timezone.
+
 ## Shared bills and markup
 
 For an invoice amount C, usage U and positive weight W, each share before rounding is:
