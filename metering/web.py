@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, Field
 from .store import Store
 from .models import Configuration, Reading, Expense, RateSelection
@@ -20,6 +21,10 @@ from .acquisition import Acquisition
 from .billing import Accounting, local_midnight
 from .rates import fetch_tariff, normalize_schedule
 from .security import Security, COOKIE, password_hash, verify
+from .sql_secrets import SqlSecrets
+from .sql_trends import SqlTrends
+from .sql_api import router as sql_router
+from . import __version__
 
 class ConfigUpdate(BaseModel):
     revision:str
@@ -35,9 +40,10 @@ class PasswordChange(BaseModel):
     new_password:str=Field(min_length=12,max_length=1000)
 
 
-def create_app(directory=None,background=True):
+def create_app(directory=None,background=True,sql_connector=None):
     directory=directory or os.environ.get("METERING_DATA_DIR",str(Path.home()/".local/share/metering-dashboard"))
     store=Store(directory);security=Security(store);collector=Acquisition(store)
+    vault=SqlSecrets(store);sql=SqlTrends(store,vault,sql_connector)
     jobs={};job_tasks={}
     async def rates_loop():
         while True:
@@ -49,15 +55,19 @@ def create_app(directory=None,background=True):
             await asyncio.sleep(60)
     @asynccontextmanager
     async def lifespan(app):
-        tasks=[asyncio.create_task(collector.run()),asyncio.create_task(rates_loop())] if background else []
+        tasks=[asyncio.create_task(collector.run()),asyncio.create_task(rates_loop()),asyncio.create_task(sql.loop())] if background else []
         yield
         tasks.extend(job_tasks.values())
         for task in tasks:task.cancel()
         for task in tasks:
             with contextlib.suppress(asyncio.CancelledError):await task
+        await sql.close()
         collector.close();store.close()
     app=FastAPI(title="Metering Dashboard",lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None)
-    app.state.store=store;app.state.collector=collector
+    app.state.store=store;app.state.collector=collector;app.state.sql=sql
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(request,error):
+        return JSONResponse({"detail":[{k:e[k] for k in ("loc","msg","type") if k in e} for e in error.errors()]},422)
     @app.middleware("http")
     async def guard(request,call_next):
         path=request.url.path
@@ -74,7 +84,7 @@ def create_app(directory=None,background=True):
         for k,v in headers.items():response.headers[k]=v
         return response
     @app.get("/api/health")
-    def health():return {"service":"metering-dashboard","status":"running","version":"0.1.0"}
+    def health():return {"service":"metering-dashboard","status":"running","version":__version__}
     @app.post("/api/login")
     def login(body:Login,request:Request,response:Response):
         try:result=security.login(body.password,request.client.host)
@@ -96,13 +106,10 @@ def create_app(directory=None,background=True):
         store.audit("password.change",{})
         return {"ok":True}
     @app.get("/api/config")
-    def config():return {"configuration":store.config().model_dump(),"revision":store.revision()}
-    @app.put("/api/config")
-    def save_config(body:ConfigUpdate):
-        with store.lock:
-            if body.revision!=store.revision():raise HTTPException(409,"Configuration changed in another session; refresh before saving")
-            cfg=body.configuration
-            # A billing formula and its input cannot both bill the same energy.
+    def config():return {"configuration":vault.public_config(store.config()),"revision":store.revision()}
+    def save_configuration(cfg,revision):
+        with store.lock,store.db:
+            if revision!=store.revision():raise HTTPException(409,"Configuration changed in another session; refresh before saving")
             meters={m.id:m for m in cfg.meters}
             def descendants(mid):return {t.meter_id for t in meters[mid].terms}|{x for t in meters[mid].terms for x in descendants(t.meter_id)}
             for m in cfg.meters:
@@ -110,13 +117,23 @@ def create_app(directory=None,background=True):
             if cfg.rate.schedule:
                 try:cfg.rate.schedule=normalize_schedule(cfg.rate.schedule)
                 except ValueError as e:raise HTTPException(400,str(e))
+            try:updates=vault.prepare(cfg)
+            except ValueError as e:raise HTTPException(400,str(e))
+            for meter in cfg.meters:
+                if meter.source_id and next(s for s in cfg.sources if s.id==meter.source_id).kind=="sql_server":
+                    if not all(k in meter.point for k in ("point_id","sql_profile","mapping_signature","expected_name","expected_units")):
+                        raise HTTPException(400,"Choose SQL trend points through the connection's point tree")
             old=store.config()
-            store.set("configuration",cfg.model_dump())
-            if old.rate!=cfg.rate:store.set("rate_sync",{})
-            store.audit("configuration.save",{"meter_count":len(cfg.meters),"source_count":len(cfg.sources)})
+            vault.write(updates,cfg)
+            store.db.execute("INSERT INTO settings VALUES('configuration',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",(cfg.model_dump_json(),))
+            if old.rate!=cfg.rate:store.db.execute("INSERT INTO settings VALUES('rate_sync','{}') ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+        store.audit("configuration.save",{"meter_count":len(cfg.meters),"source_count":len(cfg.sources)})
         return config()
+    @app.put("/api/config")
+    def save_config(body:ConfigUpdate):return save_configuration(body.configuration,body.revision)
+    app.include_router(sql_router(store,sql,save_configuration))
     @app.get("/api/status")
-    def status():return {"collector":collector.status,"last_poll":collector.last_poll,"latest":store.latest(),"rate_sync":store.get("rate_sync",{}),"tariffs":store.tariffs()}
+    def status():return {"collector":{**collector.status,**sql.status},"sql_jobs":sql.list_jobs(),"last_poll":collector.last_poll,"latest":store.latest(),"rate_sync":store.get("rate_sync",{}),"tariffs":store.tariffs()}
     @app.post("/api/discover")
     async def discover(body:Discovery):
         source=next((s for s in store.config().sources if s.id==body.source_id),None)

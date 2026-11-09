@@ -10,6 +10,8 @@ The data directory defaults to `~/.local/share/metering-dashboard`:
 | --- | --- |
 | `metering.sqlite3` and WAL/SHM companions | Configuration, readings, invoices, tariff versions and audit |
 | `initial-access.txt` | Initial password, removed after password change |
+| `sql-credentials.key` | Private SQL password encryption key; back up with the database |
+| `sql-trust/` | Private trusted CA certificate files |
 | `tariff-sources/` | Downloaded official workbook bytes by SHA-256 |
 
 Back up the directory with a SQLite-aware snapshot or stop **only this dashboard's service** before copying it. Readings are retained without automatic deletion. Check disk use and plan retention/archival appropriate to the site's meter count. Source databases are not backed up or modified by this application.
@@ -30,3 +32,5 @@ systemctl --user disable metering-dashboard
 ```
 
 Keep private state if the service may be resumed. These commands do not target any other automation service.
+
+Remote SQL sources use separate worker threads and durable import jobs. Read [SQL trend setup](sql-trends.md) for supported SQL Server authentication, point discovery, custom schema mappings, quality policy and resumable backfills.

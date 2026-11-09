@@ -39,7 +39,7 @@ class Store:
         with self.lock, self.db:
             self.db.execute("INSERT INTO settings VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key,json.dumps(value, allow_nan=False)))
     def config(self): return Configuration.model_validate(self.get("configuration"))
-    def revision(self): return hashlib.sha256(json.dumps(self.get("configuration"),sort_keys=True).encode()).hexdigest()
+    def revision(self): return hashlib.sha256(json.dumps({"configuration":self.get("configuration"),"sql_credential_revision":self.get("sql_credential_revision",0)},sort_keys=True).encode()).hexdigest()
     def audit(self, action, details):
         with self.lock, self.db:
             self.db.execute("INSERT INTO audit(timestamp,action,details) VALUES(?,?,?)", (time.time(),action,json.dumps(details)))

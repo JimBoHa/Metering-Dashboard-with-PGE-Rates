@@ -10,6 +10,7 @@
     />
     <link rel="stylesheet" href="/static/style.css" />
     <script src="/static/app.js" defer></script>
+    <script src="/static/sql.js" defer></script>
   </head>
   <body>
     <div id="login-view" class="login-shell">
@@ -331,6 +332,16 @@
               <button id="new-source" class="primary">＋ Add source</button>
             </div>
             <div id="source-list"></div>
+            <article id="sql-workspace" class="panel" hidden></article>
+            <article id="sql-job-panel" class="panel" hidden>
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">HISTORICAL DATA</p>
+                  <h2>SQL trend imports</h2>
+                </div>
+              </div>
+              <div id="sql-job-list"></div>
+            </article>
             <article class="panel" id="discovery-results" hidden>
               <div class="panel-heading">
                 <div>

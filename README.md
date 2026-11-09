@@ -7,6 +7,7 @@ A standalone, private-network web application for utility metering, time-of-use 
 - Meter inventory with editable display names, systems, units, scaling and data quality.
 - Read-only BACnet/IP discovery, directed subnet discovery, paged point lists and cancellable full-device inventory. ReadPropertyMultiple has a single-property fallback for older devices.
 - Modbus TCP holding/input register reads, HTTP JSON numeric point discovery, manual CSV/JSON readings, and a read-only adapter for an existing `current_samples` SQLite table.
+- Remote Microsoft SQL Server trend sources with encrypted saved passwords, searchable point trees, Metasys analog historian detection, configurable table/column mapping, historical backfill and incremental sync. See [SQL trend setup](docs/sql-trends.md).
 - A draggable calculation canvas: combine signed inputs into net meters, including supply minus return. Formula cycles, mismatched units and overlapping parent/child billing are rejected.
 - Runtime imports from PG&E's official published workbooks for **B-6, B-19 and B-20**, including B-19/B-20 R/S options. Users enter their schedule, voltage, service option and customer class in the web page. Unsupported selections produce an explicit error.
 - Pacific-time seasonal TOU calculations, 15-minute demand estimates, daily fixed charges, global/per-meter markup, effective-dated tariff versions and retained source checksums.
@@ -56,6 +57,8 @@ journalctl --user -u metering-dashboard
 6. In **PG&E rates**, enter the exact schedule and option from the account's bill. Validate and fetch. Select only the intended kWh meter(s) for electrical pricing; do not price a net meter and its own inputs simultaneously. Tenant sub-meters default to energy-only pricing. Enable account-level demand/fixed charges only for the appropriate service meter, or enter those shared charges once as an allocated bill.
 7. Enter other bills with their bill date and **start-inclusive, end-exclusive** usage dates. Select meters with the same unit and adjust positive allocation weights as needed. A net meter and its inputs cannot share the same allocation pool.
 
+Remote SQL users can enter their server and credentials in Sources & discovery, then select trend points from the discovered tree. No SQL server address or login is embedded in the source.
+
 No initial site configuration or tariff is provided. See [accounting rules](docs/accounting.md) and [operations](docs/operations.md) before using estimates in a billing process.
 
 ## PG&E rate updates
@@ -83,6 +86,7 @@ Before publishing, run `python scripts/check_public_source.py` and inspect `git 
 ```bash
 .venv/bin/python -m pytest -q
 node --check metering/static/app.js
+node --check metering/static/sql.js
 .venv/bin/python scripts/check_public_source.py
 ```
 

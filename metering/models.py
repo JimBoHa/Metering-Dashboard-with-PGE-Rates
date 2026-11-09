@@ -13,7 +13,7 @@ class Model(BaseModel):
 class Source(Model):
     id: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,80}$")
     name: str = Field(min_length=1, max_length=120)
-    kind: Literal["bacnet", "modbus", "http_json", "platform_sqlite"]
+    kind: Literal["bacnet", "modbus", "http_json", "platform_sqlite", "sql_server"]
     enabled: bool = True
     # Addresses, file paths and credentials are entered at runtime only.
     settings: dict = Field(default_factory=dict)

@@ -1343,3 +1343,129 @@ footer {
     grid-template-columns: minmax(0, 1fr) 70px 25px;
   }
 }
+.sql-connection-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+.sql-connection-row label {
+  min-width: 210px;
+  flex: 1;
+}
+.sql-point-tree {
+  max-height: 540px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 18px;
+  margin-top: 14px;
+  background: #fbfcf9;
+}
+.sql-point-tree ul {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0 4px 23px;
+}
+.sql-point-tree summary {
+  padding: 9px 0;
+  color: #6c805c;
+  font-size: 12px;
+  cursor: pointer;
+}
+.sql-point-leaf {
+  padding: 7px 0;
+}
+.sql-point-leaf label {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 9px;
+  cursor: pointer;
+  color: #567048;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.sql-point-leaf small {
+  display: block;
+  font-size: 9px;
+  color: #9aa68d;
+  margin-top: 3px;
+}
+.sql-point-leaf input {
+  margin-top: 3px;
+}
+.sql-folder-icon {
+  color: #a7b896;
+  margin: 0 5px;
+}
+.sql-review-item {
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin-bottom: 15px;
+}
+.sql-review-item > p {
+  margin: 10px 0 15px;
+  overflow-wrap: anywhere;
+}
+.sql-review-list {
+  max-height: 45vh;
+  overflow: auto;
+}
+.sql-job {
+  padding: 18px 0;
+  border-top: 1px solid var(--line);
+}
+.sql-job h3 {
+  font-size: 13px;
+  margin-bottom: 7px;
+}
+.sql-job p {
+  font-size: 10px;
+  margin-bottom: 6px;
+}
+.sql-job-error {
+  color: #b57a52;
+  line-height: 1.7;
+  max-width: 650px;
+}
+.sql-job .tag {
+  margin-left: 8px;
+}
+#sql-map-details {
+  margin-top: 20px;
+}
+#sql-map-details > summary {
+  color: #819271;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 9px 0;
+}
+.source-actions {
+  flex-wrap: wrap;
+}
+@media (max-width: 560px) {
+  .sql-point-tree {
+    padding: 10px;
+  }
+  .sql-point-tree ul {
+    padding-left: 13px;
+  }
+  .sql-connection-row {
+    align-items: stretch;
+  }
+  .sql-connection-row label {
+    width: 100%;
+  }
+  .sql-review-item {
+    padding: 12px;
+  }
+  .sql-job h3 {
+    line-height: 1.7;
+  }
+}
+.sql-connection-row select {
+  min-height: 38px;
+}

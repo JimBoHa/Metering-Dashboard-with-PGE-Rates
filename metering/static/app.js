@@ -136,6 +136,7 @@ async function load() {
   document.querySelector(".timezone").textContent = state.config.timezone;
   renderMeters();
   renderSources();
+  bindSqlSourceActions();
   renderRates();
   renderSettings();
   renderExpenses();
@@ -541,6 +542,15 @@ function editMeter(id, preset = {}) {
   $("m-mode").onchange = fields;
   function pointHelp() {
     const s = state.config.sources.find((s) => s.id === $("m-source").value);
+    $("m-point").closest("label").hidden = s?.kind === "sql_server";
+    if (s?.kind === "sql_server") {
+      $("point-help").textContent =
+        "SQL trend: " +
+        (m.point.expected_name ||
+          "Choose the point in Sources & discovery first") +
+        ". Historical imports and incremental sync are managed on the source page.";
+      return;
+    }
     $("point-help").textContent =
       s?.kind === "bacnet"
         ? "BACnet: address, object_type and object_instance. Discovery fills these in for you."
@@ -815,7 +825,7 @@ function renderSources() {
     state.config.sources
       .map(
         (s) =>
-          `<div class="source-item"><div class="source-row"><div><h3>${escape(s.name)}</h3><p class="muted">${escape({ bacnet: "BACnet / IP", modbus: "Modbus TCP", http_json: "HTTP JSON", platform_sqlite: "Local sample database" }[s.kind])} · ${s.enabled ? "Enabled" : "Disabled"}</p></div><div class="source-actions"><button class="secondary small" data-source-edit="${s.id}">Configure</button><button class="primary small" data-discover="${s.id}">Discover ${s.kind === "bacnet" ? "devices" : "points"} ↗</button></div></div></div>`,
+          `<div class="source-item"><div class="source-row"><div><h3>${escape(s.name)}</h3><p class="muted">${escape({ bacnet: "BACnet / IP", modbus: "Modbus TCP", http_json: "HTTP JSON", platform_sqlite: "Local sample database", sql_server: "Microsoft SQL Server trends" }[s.kind])} · ${s.enabled ? "Enabled" : "Disabled"}</p></div><div class="source-actions"><button class="secondary small" data-source-edit="${s.id}">Configure</button><button class="primary small" data-discover="${s.id}">${s.kind === "sql_server" ? "Browse trend points" : "Discover " + (s.kind === "bacnet" ? "devices" : "points")} ↗</button>${s.kind === "sql_server" ? `<button class="secondary small" data-sql-import="${s.id}">Import trends</button>` : ""}</div></div></div>`,
       )
       .join("") ||
     `<article class="panel">${empty("Connect a source", "Add a network reader or a local read-only data connection.", "⌁")}</article>`;
@@ -827,8 +837,19 @@ function renderSources() {
     .forEach(
       (b) =>
         (b.onclick = () =>
-          action(b, () => discover(b.dataset.discover)).catch(() => {})),
+          action(b, () =>
+            state.config.sources.find((s) => s.id === b.dataset.discover)
+              ?.kind === "sql_server"
+              ? openSqlSource(b.dataset.discover)
+              : discover(b.dataset.discover),
+          ).catch(() => {})),
     );
+}
+function bindSqlSourceActions() {
+  document
+    .querySelectorAll("[data-sql-import]")
+    .forEach((b) => (b.onclick = () => openSqlImport(b.dataset.sqlImport)));
+  if (typeof renderSqlJobs === "function") renderSqlJobs();
 }
 function editSource(id) {
   const existing = state.config.sources.find((s) => s.id === id);
@@ -848,6 +869,7 @@ function editSource(id) {
       ["modbus", "Modbus TCP"],
       ["http_json", "HTTP JSON"],
       ["platform_sqlite", "Local automation sample database (read only)"],
+      ["sql_server", "Microsoft SQL Server trends"],
     ]
       .map(([v, l]) => option(v, l, source.kind))
       .join(
@@ -866,6 +888,8 @@ function editSource(id) {
     if (kind === "http_json")
       $("source-fields").innerHTML =
         `<label class="full">JSON endpoint URL<input id="s-url" type="url" value="${escape(s.url || "")}" required></label><label class="full">Request headers (JSON, optional)<textarea id="s-headers">${escape(JSON.stringify(s.headers || {}, null, 2))}</textarea></label><p class="form-help full">Nested numeric fields become selectable points. Tokens remain in the private configuration database. Responses must fit within 2 MB.</p>`;
+    if (kind === "sql_server")
+      $("source-fields").innerHTML = sqlSourceFields(s);
     if (kind === "platform_sqlite")
       $("source-fields").innerHTML =
         `<label class="full">Absolute path to existing sample database<input id="s-path" value="${escape(s.path || "")}" required></label><p class="form-help full">Uses SQLite mode=ro and query_only against the current_samples table. It does not modify the source database, software or serial links. Only numeric points are offered as meter candidates.</p>`;
@@ -900,6 +924,10 @@ function editSource(id) {
           };
         if (kind === "platform_sqlite")
           settings = { path: $("s-path").value.trim() };
+        if (kind === "sql_server")
+          settings = readSqlSourceFields(
+            source.kind === kind ? source.settings : {},
+          );
         const cfg = copyConfig();
         const updated = {
           ...source,
@@ -912,9 +940,12 @@ function editSource(id) {
         if (ix < 0) cfg.sources.push(updated);
         else cfg.sources[ix] = updated;
         await saveConfig(cfg);
+        if (kind === "sql_server") $("sql-password").value = "";
         $("editor").close();
         renderSources();
+        bindSqlSourceActions();
         toast("Connection saved");
+        if (kind === "sql_server") await openSqlSource(source.id);
       });
     } catch (e) {
       formError(e);
@@ -928,8 +959,15 @@ function editSource(id) {
         const cfg = copyConfig();
         cfg.sources = cfg.sources.filter((s) => s.id !== source.id);
         await saveConfig(cfg);
+        if ($("sql-password")) $("sql-password").value = "";
         $("editor").close();
         renderSources();
+        bindSqlSourceActions();
+        if (typeof sqlView !== "undefined" && sqlView.sourceId === source.id) {
+          sqlView.sourceId = null;
+          sqlView.selected.clear();
+          $("sql-workspace").hidden = true;
+        }
         toast("Source removed");
       } catch (e) {
         formError(e);

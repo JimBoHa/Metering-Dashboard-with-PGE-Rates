@@ -244,7 +244,7 @@ class Acquisition:
             for m in cfg.meters:
                 if not m.enabled or not m.source_id:continue
                 source=sources[m.source_id]
-                if not source.enabled:continue
+                if not source.enabled or source.kind=="sql_server":continue
                 try:
                     reading=await self.read_meter(m,source,cache)
                     self.store.add_reading(reading)
