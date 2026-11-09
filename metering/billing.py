@@ -19,7 +19,7 @@ def money(n):
 
 
 class Accounting:
-    def __init__(self, store, config=None, require_monthly_rates=False):
+    def __init__(self, store, config=None, require_monthly_rates=False, include_unverified=False):
         self.store = store
         self.config = config or store.config()
         self.meters = {m.id:m for m in self.config.meters}
@@ -28,6 +28,14 @@ class Accounting:
         self.monthly_selections={r.month:r.selection.model_dump() for r in self.config.monthly_rates}
         self.tariff_cache={}
         self._tariffs=None
+        self.include_unverified=include_unverified
+
+    def usable(self,rows,issues):
+        if any(r["quality"] not in ({"good","unverified"} if self.include_unverified else {"good"}) for r in rows):
+            issues.add("Unverified or failed readings excluded");return False
+        if any(r["quality"]=="unverified" for r in rows):
+            issues.add("Unverified readings included for operational display only; excluded from billing")
+        return True
 
     def segments(self, mid, start, end):
         key = (mid,start,end)
@@ -56,8 +64,7 @@ class Accounting:
             rows = self.store.readings(mid,start,end)
             if m.mode == "interval":
                 for r in rows:
-                    if r["quality"] != "good":
-                        issues.add("Unverified or failed readings excluded"); continue
+                    if not self.usable([r],issues):continue
                     a,b=r["timestamp"]-m.interval_seconds,r["timestamp"]
                     lo,hi=max(a,start),min(b,end)
                     if hi>lo:
@@ -70,8 +77,7 @@ class Accounting:
                     a,b = r1["timestamp"],r2["timestamp"]
                     lo,hi = max(a,start),min(b,end)
                     if hi<=lo: continue
-                    if any(r["quality"]!="good" for r in (r1,r2)):
-                        issues.add("Unverified or failed readings excluded"); continue
+                    if not self.usable([r1,r2],issues):continue
                     if r1.get("stream_id")!=r2.get("stream_id"):
                         issues.add("Source configuration changed; transition excluded");continue
                     if b-a>m.max_gap_seconds:

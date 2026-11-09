@@ -10,6 +10,7 @@ const state = {
   csrf: null,
   authRequired: true,
   discovery: null,
+  live: null,
 };
 const categories = [
   "Electrical",
@@ -130,15 +131,17 @@ function useSession(session) {
   $("auth-disabled").hidden = state.authRequired;
 }
 async function load() {
-  const [cfg, status, expenses] = await Promise.all([
+  const [cfg, status, expenses, live] = await Promise.all([
     api("/api/config"),
     api("/api/status"),
     api("/api/expenses"),
+    api("/api/live"),
   ]);
   state.config = cfg.configuration;
   state.revision = cfg.revision;
   state.status = status;
   state.expenses = expenses;
+  state.live = live;
   $("app-view").hidden = false;
   $("login-view").hidden = true;
   document.querySelector(".timezone").textContent = state.config.timezone;
@@ -149,6 +152,7 @@ async function load() {
   renderSettings();
   renderExpenses();
   renderMonthlyPlan();
+  renderLiveSummary();
   await runReport();
   renderExpenses();
   renderMeters();
@@ -224,6 +228,7 @@ function navigate(page) {
   if (page === "canvas") renderCanvas();
   if (page === "settings") loadAudit();
   if (page === "monthly") loadMonthlyImportStatus();
+  renderLiveSummary();
   history.replaceState(null, "", "#" + page);
 }
 function meterStatus(m) {
@@ -433,8 +438,7 @@ function renderMeters() {
       .map((m) => {
         const status = meterStatus(m);
         const latest = state.status.latest?.[m.id];
-        const usage = state.report?.meters.find((r) => r.meter_id === m.id);
-        return `<article class="panel meter-card"><div class="meter-card-head"><span class="tag ${status.type}">${escape(status.label)}</span><button class="icon-button edit-meter" data-id="${m.id}" aria-label="Edit ${escape(m.name)}">⋯</button></div><h3>${escape(m.name)}</h3><span class="muted" style="font-size:10px">${escape(m.category)} · ${escape(m.mode)}</span><div class="meter-value">${m.mode === "virtual" ? fmt(usage?.quantity) : latest ? fmt(latest.value * m.scale + m.offset) : "—"} <small>${escape(m.unit)}${m.mode === "rate" ? "/" + (m.rate_period_seconds === 60 ? "min" : "h") : ""}</small></div><div class="meter-card-foot"><span>${m.billable ? "Electric billing enabled" : m.mode === "virtual" ? "Net usage in report period" : "Measurement input"}</span><span>${latest ? new Date(latest.timestamp * 1000).toLocaleDateString() : "No readings"}</span></div></article>`;
+        return `<article class="panel meter-card"><div class="meter-card-head"><span class="tag ${status.type}">${escape(status.label)}</span><button class="icon-button edit-meter" data-id="${m.id}" aria-label="Edit ${escape(m.name)}">⋯</button></div><h3>${escape(m.name)}</h3><span class="muted" style="font-size:10px">${escape(m.category)} · ${escape(m.mode)}</span>${liveMeterMarkup(m)}<div class="meter-card-foot"><span>${m.billable ? "Electric billing enabled" : "Operational display"}</span><span>${latest ? new Date(latest.timestamp * 1000).toLocaleDateString() : m.mode === "virtual" ? "Calculated from inputs" : "No readings"}</span></div></article>`;
       })
       .join("") ||
     empty(
@@ -502,7 +506,15 @@ function editMeter(id, preset = {}) {
       .map(([v, l]) => option(v, l, m.mode))
       .join(
         "",
-      )}</select></label><label>Markup override (%)<input id="m-markup" type="number" min="0" max="1000" step="0.01" value="${m.markup_percent ?? ""}" placeholder="Use workspace markup"></label><div id="physical-fields" class="full form-grid"><label class="full">Source<select id="m-source">${option("", "Manual / imported readings", m.source_id || "")}${state.config.sources.map((s) => option(s.id, s.name, m.source_id)).join("")}</select></label><label class="full">Point reference (JSON)<textarea id="m-point" rows="3">${escape(JSON.stringify(m.point, null, 2))}</textarea></label><p id="point-help" class="form-help full"></p><label class="check-row full"><input id="m-commissioned" type="checkbox" ${m.point.commissioned ? "checked" : ""}> Source display, units and scaling have been checked for billing</label><label>Multiplier / scale<input id="m-scale" type="number" step="any" value="${m.scale}" required></label><label>Offset<input id="m-offset" type="number" step="any" value="${m.offset}" required></label><label>Rate basis (seconds)<input id="m-rate-period" type="number" min="1" max="86400" value="${m.rate_period_seconds}"></label><label>Interval duration (seconds)<input id="m-interval" type="number" min="1" max="86400" value="${m.interval_seconds}"></label><label>Maximum sample gap (seconds)<input id="m-gap" type="number" min="1" max="86400" value="${m.max_gap_seconds}"></label><label>Counter rollover modulus (optional)<input id="m-rollover" type="number" min="0.0001" step="any" value="${m.rollover ?? ""}"></label><p class="form-help full">For kW → kWh use a rate basis of 3600. For gallons/minute → gallons use 60. Counter deltas are distributed uniformly between verified samples. Gaps longer than your limit are excluded.</p></div><div id="formula-fields" class="full"><label>Signed formula inputs</label><div id="term-list" style="margin-top:12px"></div><button id="add-term" class="secondary small" type="button">＋ Add input</button><p class="form-help" style="margin-top:12px">Use +1 to add a supply and −1 to subtract a return. Input units must match. Formula cycles are rejected.</p></div><label class="check-row"><input id="m-enabled" type="checkbox" ${m.enabled ? "checked" : ""}> Enabled</label><label class="check-row"><input id="m-billable" type="checkbox" ${m.billable ? "checked" : ""}> Price electric usage</label><label class="check-row full"><input id="m-account-charges" type="checkbox" ${m.electricity_charges === "account" ? "checked" : ""}> Include account-level demand and fixed charges</label><p class="form-help full">Leave account charges off for tenant sub-meters. Shared account charges can be entered once as a bill and allocated by usage.</p><p id="editor-error" class="dialog-error"></p><div class="dialog-actions">${existing ? '<button id="delete-meter" type="button" class="secondary danger">Remove meter</button>' : ""}<button class="primary" type="submit">Save meter</button></div></form>`,
+      )}</select></label><label>Overview display<select id="m-dashboard">${[
+      ["none", "Not pinned"],
+      ["live", "Pin live reading"],
+      ["month_to_date", "Pin month-to-date usage"],
+    ]
+      .map(([v, label]) => option(v, label, m.display_on_dashboard || "none"))
+      .join(
+        "",
+      )}</select></label><label>Markup override (%)<input id="m-markup" type="number" min="0" max="1000" step="0.01" value="${m.markup_percent ?? ""}" placeholder="Use workspace markup"></label><div id="physical-fields" class="full form-grid"><label class="full">Source<select id="m-source">${option("", "Manual / imported readings", m.source_id || "")}${state.config.sources.map((s) => option(s.id, s.name, m.source_id)).join("")}</select></label><label class="full">Point reference (JSON)<textarea id="m-point" rows="3">${escape(JSON.stringify(m.point, null, 2))}</textarea></label><p id="point-help" class="form-help full"></p><label class="check-row full"><input id="m-commissioned" type="checkbox" ${m.point.commissioned ? "checked" : ""}> Source display, units and scaling have been checked for billing</label><label>Multiplier / scale<input id="m-scale" type="number" step="any" value="${m.scale}" required></label><label>Offset<input id="m-offset" type="number" step="any" value="${m.offset}" required></label><label>Rate basis (seconds)<input id="m-rate-period" type="number" min="1" max="86400" value="${m.rate_period_seconds}"></label><label>Interval duration (seconds)<input id="m-interval" type="number" min="1" max="86400" value="${m.interval_seconds}"></label><label>Maximum sample gap (seconds)<input id="m-gap" type="number" min="1" max="86400" value="${m.max_gap_seconds}"></label><label>Counter rollover modulus (optional)<input id="m-rollover" type="number" min="0.0001" step="any" value="${m.rollover ?? ""}"></label><p class="form-help full">Usage unit describes accumulated consumption. A kW input uses usage unit kWh and rate basis 3600; its live display is kW. Counter registers stay kWh. Pin a total to show its live reading or observed month-to-date usage. For kW → kWh use a rate basis of 3600. For gallons/minute → gallons use 60. Counter deltas are distributed uniformly between verified samples. Gaps longer than your limit are excluded.</p></div><div id="formula-fields" class="full"><label>Signed formula inputs</label><div id="term-list" style="margin-top:12px"></div><button id="add-term" class="secondary small" type="button">＋ Add input</button><p class="form-help" style="margin-top:12px">Use +1 to add a supply and −1 to subtract a return. Choose inputs of the same measurement type. A kW rate accumulates kWh; a kWh counter is already accumulated energy. Keep power sums separate from energy-counter sums. Formula cycles are rejected.</p></div><label class="check-row"><input id="m-enabled" type="checkbox" ${m.enabled ? "checked" : ""}> Enabled</label><label class="check-row"><input id="m-billable" type="checkbox" ${m.billable ? "checked" : ""}> Price electric usage</label><label class="check-row full"><input id="m-account-charges" type="checkbox" ${m.electricity_charges === "account" ? "checked" : ""}> Include account-level demand and fixed charges</label><p class="form-help full">Leave account charges off for tenant sub-meters. Shared account charges can be entered once as a bill and allocated by usage.</p><p id="editor-error" class="dialog-error"></p><div class="dialog-actions">${existing ? '<button id="delete-meter" type="button" class="secondary danger">Remove meter</button>' : ""}<button class="primary" type="submit">Save meter</button></div></form>`,
   );
   const terms = m.terms.length
     ? structuredClone(m.terms)
@@ -517,7 +529,7 @@ function editMeter(id, preset = {}) {
     $("term-list").innerHTML = terms
       .map(
         (t, i) =>
-          `<div class="term-row"><select data-term="${i}" aria-label="Input meter">${option("", "Select input", t.meter_id)}${peers.map((p) => option(p.id, p.name + " · " + p.unit, t.meter_id)).join("")}</select><input type="number" step="any" value="${t.factor}" data-factor="${i}" aria-label="Signed multiplier"><button type="button" data-remove="${i}" aria-label="Remove input">×</button></div>`,
+          `<div class="term-row"><select data-term="${i}" aria-label="Input meter">${option("", "Select input", t.meter_id)}${peers.map((p) => option(p.id, meterInputLabel(p), t.meter_id)).join("")}</select><input type="number" step="any" value="${t.factor}" data-factor="${i}" aria-label="Signed multiplier"><button type="button" data-remove="${i}" aria-label="Remove input">×</button></div>`,
       )
       .join("");
     document
@@ -607,6 +619,7 @@ function editMeter(id, preset = {}) {
           markup_percent: $("m-markup").value
             ? Number($("m-markup").value)
             : null,
+          display_on_dashboard: $("m-dashboard").value,
         };
         if (mode === "virtual" && terms.some((t) => !t.meter_id))
           throw Error("Choose every formula input");
@@ -665,17 +678,15 @@ function editMeter(id, preset = {}) {
     };
 }
 function renderCanvas() {
+  const meters = canvasMeters();
   $("meter-canvas").style.width =
-    Math.max(1800, ...state.config.meters.map((m) => m.x + 300)) + "px";
+    Math.max(1200, ...meters.map((m) => m.x + 300)) + "px";
   $("meter-canvas").style.height =
-    Math.max(900, ...state.config.meters.map((m) => m.y + 300)) + "px";
-  const usage = new Map(
-    (state.report?.meters || []).map((m) => [m.meter_id, m]),
-  );
-  $("canvas-nodes").innerHTML = state.config.meters
+    Math.max(760, ...meters.map((m) => m.y + 300)) + "px";
+  $("canvas-nodes").innerHTML = meters
     .map(
       (m) =>
-        `<div class="canvas-node ${m.mode === "virtual" ? "virtual" : ""}" data-mid="${m.id}" style="left:${m.x}px;top:${m.y}px" tabindex="0" role="group" aria-label="${escape(m.name)}. Drag to move; use arrow keys to adjust; Enter to edit."><div class="node-head"><span>${m.mode === "virtual" ? "CALCULATED METER" : "METER INPUT"}</span><button class="icon-button" style="font-size:14px" data-edit="${m.id}" aria-label="Edit formula or meter">⋯</button></div><div class="node-body"><strong>${escape(m.name)}</strong><div class="node-quantity">${fmt(usage.get(m.id)?.quantity)} <small>${escape(m.unit)}</small></div></div>${m.mode === "virtual" ? `<div class="node-formula">${m.terms.map((t) => `${t.factor >= 0 ? "+" : ""}${t.factor} × ${escape(state.config.meters.find((x) => x.id === t.meter_id)?.name || "Unknown")}`).join("<br>")}</div>` : ""}<span class="node-port"></span></div>`,
+        `<div class="canvas-node ${m.mode === "virtual" ? "virtual" : ""}" data-mid="${m.id}" style="left:${m.x}px;top:${m.y}px" tabindex="0" role="group" aria-label="${escape(m.name)}. Drag to move; use arrow keys to adjust; Enter to edit."><div class="node-head"><span>${m.mode === "virtual" ? "CALCULATED METER" : "METER INPUT"}</span><button class="icon-button" style="font-size:14px" data-edit="${m.id}" aria-label="Edit formula or meter">⋯</button></div><div class="node-body" data-live-node="${m.id}"><strong>${escape(m.name)}</strong>${liveMeterMarkup(m, true)}</div>${m.mode === "virtual" ? `<div class="node-formula">${m.terms.map((t) => `${t.factor >= 0 ? "+" : ""}${t.factor} × ${escape(state.config.meters.find((x) => x.id === t.meter_id)?.name || "Unknown")}`).join("<br>")}</div>` : ""}<span class="node-port"></span></div>`,
     )
     .join("");
   if (!state.config.meters.length)
@@ -816,7 +827,7 @@ function renderRates() {
   $("rate-library").innerHTML = (state.status.tariffs || [])
     .map(
       (t) =>
-        `<div class="rate-card"><h3>${escape(t.selection.schedule)} · ${escape(t.selection.option === "base" ? "Standard" : "Option " + t.selection.option)} · ${escape(t.selection.voltage)}</h3><p class="rate-metadata">Effective ${escape(t.effective_from)}${t.effective_to ? " to " + escape(t.effective_to) + " (exclusive)" : " onward"}<br>${escape(t.selection.service)} · ${escape(t.sheet)}</p>${Object.entries(
+        `<div class="rate-card"><h3>${escape(t.selection.schedule)} · ${escape(t.selection.option === "base" ? "Standard" : "Option " + t.selection.option)} · ${escape(t.selection.voltage)}</h3><p class="rate-metadata">Effective ${escape(t.effective_from)}${t.effective_to ? " to " + escape(t.effective_to) + " (exclusive)" : " onward"}<br>${escape(t.selection.service)} · ${escape(t.sheet)}</p><p class="form-help">Bundled totals include generation and delivery. Energy is priced per kWh; demand is priced per kW.</p>${Object.entries(
           t.energy,
         )
           .map(
@@ -832,7 +843,7 @@ function renderRates() {
           )
           .join(
             "",
-          )}<div class="rate-cell"><span>Demand components</span><strong>${t.demand.length}</strong></div><div class="rate-cell"><span>Customer charge</span><strong>${cash(t.customer_daily)} / day</strong></div><p class="rate-metadata">Source checksum: ${escape(t.source_sha256.slice(0, 20))}…</p><a class="inline-link" target="_blank" rel="noreferrer" href="${escape(t.source_url)}">Official source workbook ↗</a></div>`,
+          )}${renderDemandRates(t)}<div class="rate-cell"><span>Customer charge</span><strong>$${t.customer_daily.toFixed(5)} / meter / day</strong></div><p class="rate-metadata">Source checksum: ${escape(t.source_sha256.slice(0, 20))}…</p><a class="inline-link" target="_blank" rel="noreferrer" href="${escape(t.source_url)}">Official source workbook ↗</a></div>`,
     )
     .join("");
 }

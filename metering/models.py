@@ -41,6 +41,7 @@ class Meter(Model):
     billable: bool = False
     electricity_charges: Literal["energy_only", "account"] = "energy_only"
     markup_percent: float | None = Field(default=None, ge=0, le=1000)
+    display_on_dashboard: Literal["none", "live", "month_to_date"] = "none"
     x: float = Field(default=60, ge=0, le=5000)
     y: float = Field(default=60, ge=0, le=5000)
     @model_validator(mode="after")

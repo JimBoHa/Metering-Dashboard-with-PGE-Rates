@@ -19,6 +19,11 @@ def numeric(value):
     return v
 
 
+def stream_fingerprint(meter,source):
+    stream={"source_kind":source.kind,"source_settings":source.settings,"point":meter.point,"mode":meter.mode,"unit":meter.unit,"scale":meter.scale,"offset":meter.offset,"rate_period_seconds":meter.rate_period_seconds,"interval_seconds":meter.interval_seconds}
+    return hashlib.sha256(json.dumps(stream,sort_keys=True).encode()).hexdigest()
+
+
 def read_platform(source, point=None):
     path=Path(source.settings["path"]).expanduser().resolve()
     if not path.is_file():raise ValueError("Configured source database does not exist")
@@ -234,8 +239,7 @@ class Acquisition:
             if p.get("unverified_reason") and not p.get("commissioned") and quality=="good":
                 quality="unverified";error=p["unverified_reason"]
         if now>time.time()+60:raise ValueError("Source timestamp is in the future")
-        stream={"source_kind":source.kind,"source_settings":source.settings,"point":meter.point,"mode":meter.mode,"unit":meter.unit,"scale":meter.scale,"offset":meter.offset,"rate_period_seconds":meter.rate_period_seconds,"interval_seconds":meter.interval_seconds}
-        stream_id=hashlib.sha256(json.dumps(stream,sort_keys=True).encode()).hexdigest()
+        stream_id=stream_fingerprint(meter,source)
         return Reading(meter_id=meter.id,timestamp=now,value=value,quality=quality,error=error,stream_id=stream_id)
 
     async def poll(self):

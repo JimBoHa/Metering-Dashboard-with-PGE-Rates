@@ -12,6 +12,7 @@
     <script src="/static/app.js" defer></script>
     <script src="/static/sql.js" defer></script>
     <script src="/static/monthly.js" defer></script>
+    <script src="/static/live.js" defer></script>
   </head>
   <body>
     <div id="login-view" class="login-shell" hidden>
@@ -106,6 +107,12 @@
               ↻ Refresh readings
             </button>
           </div>
+          <section
+            id="live-summary"
+            class="live-summary"
+            aria-label="Pinned live totals"
+            hidden
+          ></section>
           <section id="page-overview" class="page">
             <div class="period-bar">
               <span
@@ -273,10 +280,17 @@
           <section id="page-canvas" class="page" hidden>
             <div class="toolbar">
               <p class="muted">
-                Drag cards to arrange your system. Add signed inputs to create a
-                net meter.
+                Drag cards to arrange your system. Live readings and recorded
+                month-to-date usage update automatically. Edit a total to see
+                its signed inputs.
               </p>
               <div>
+                <select id="canvas-filter" aria-label="Meters shown on canvas">
+                  <option value="featured">
+                    Pinned totals &amp; their inputs
+                  </option>
+                  <option value="all">All meters</option>
+                </select>
                 <button id="canvas-reset" class="secondary">
                   Arrange cards</button
                 ><button id="new-formula" class="primary">＋ Net meter</button>
@@ -294,9 +308,9 @@
               </div>
             </div>
             <p class="muted small-note">
-              Positions save automatically. Formulas use matching units and
-              aligned, verified time intervals. Set billing only on the intended
-              net meter.
+              Positions save automatically. Period usage uses aligned observed
+              intervals; unverified display previews are excluded from billing.
+              Set billing only on the intended net meter.
             </p>
           </section>
           <section id="page-rates" class="page" hidden>

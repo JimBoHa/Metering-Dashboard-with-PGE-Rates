@@ -24,4 +24,5 @@ jobs:
       - run: node --check metering/static/app.js
       - run: node --check metering/static/sql.js
       - run: node --check metering/static/monthly.js
+      - run: node --check metering/static/live.js
       - run: python scripts/check_public_source.py

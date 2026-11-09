@@ -27,6 +27,7 @@ from .sql_secrets import SqlSecrets
 from .sql_trends import SqlTrends
 from .sql_api import router as sql_router
 from .monthly_api import router as monthly_router
+from .live import LiveView
 from . import __version__
 
 class ConfigUpdate(BaseModel):
@@ -146,6 +147,8 @@ def create_app(directory=None,background=True,sql_connector=None,auth_required=N
     app.include_router(monthly_router(store,job_tasks))
     @app.get("/api/status")
     def status():return {"collector":{**collector.status,**sql.status},"sql_jobs":sql.list_jobs(),"last_poll":collector.last_poll,"latest":store.latest(),"rate_sync":store.get("rate_sync",{}),"tariffs":store.tariffs()}
+    @app.get("/api/live")
+    def live():return LiveView(store,status={**collector.status,**sql.status}).summary()
     @app.post("/api/discover")
     async def discover(body:Discovery):
         source=next((s for s in store.config().sources if s.id==body.source_id),None)
