@@ -18,6 +18,21 @@ Back up the directory with a SQLite-aware snapshot or stop **only this dashboard
 
 Configuration saves use a revision token to reject stale browser edits. Sessions expire after eight hours and are held in memory; restarting the process signs users out. Password changes invalidate all sessions. Login attempts are rate-limited. The app intentionally has a single administrator role in this release.
 
+## Temporary access without sign-in
+
+Authentication is enabled by default. To temporarily disable it for the user service, create `~/.config/systemd/user/metering-dashboard.service.d/auth.conf` containing:
+
+```ini
+[Service]
+Environment=METERING_AUTH_DISABLED=1
+```
+
+Run `systemctl --user daemon-reload` and `systemctl --user restart metering-dashboard`. The dashboard opens directly and permits anyone who can reach it to view and edit the workspace. Sign-out and password-change controls are hidden. Existing passwords, SQL credentials and meter configuration are preserved.
+
+To restore sign-in, remove this drop-in file, then run the same reload and restart commands. For a foreground process, set or unset `METERING_AUTH_DISABLED` before starting it. CSRF and same-origin checks remain active in both modes; API clients obtain their `csrf` token from `/api/session` and send it in `X-CSRF-Token` for mutations.
+
+## Data imports and discovery
+
 For CSV/JSON reading imports, create physical meters first. JSON rows contain `meter_id`, Unix-second `timestamp`, numeric `value`, and optional `quality`/`error`. CSV supports `meter_id,timestamp,value,quality`; timestamps may also be ISO 8601 with an explicit timezone. Up to 10,000 rows / 2 MB are accepted per request. Future timestamps and virtual-meter readings are rejected.
 
 BACnet discovery lists analog input/output/value, accumulator, pulse-converter and numeric value objects. Only add measurements whose semantics match their configured mode. A temperature, instantaneous power value, cumulative energy counter, diagnostic register and rolling total have different meanings even when all are numeric. Modbus discovery probes an explicit register block and does not infer a manufacturer's register map.

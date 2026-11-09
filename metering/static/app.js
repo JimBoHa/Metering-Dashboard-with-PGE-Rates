@@ -8,6 +8,7 @@ const state = {
   expenses: [],
   page: "overview",
   csrf: null,
+  authRequired: true,
   discovery: null,
 };
 const categories = [
@@ -120,6 +121,13 @@ function showLogin() {
   $("app-view").hidden = true;
   $("login-view").hidden = false;
   state.csrf = null;
+}
+function useSession(session) {
+  state.csrf = session.csrf;
+  state.authRequired = session.auth_required !== false;
+  $("logout").hidden = !state.authRequired;
+  $("password-panel").hidden = !state.authRequired;
+  $("auth-disabled").hidden = state.authRequired;
 }
 async function load() {
   const [cfg, status, expenses] = await Promise.all([
@@ -1349,7 +1357,7 @@ $("login-form").onsubmit = async (e) => {
         method: "POST",
         body: { password: $("login-password").value },
       });
-      state.csrf = r.csrf;
+      useSession(r);
       $("login-password").value = "";
       await load();
       navigate(location.hash.slice(1) || "overview");
@@ -1465,7 +1473,7 @@ $("report-end").value = dateStr(
 );
 api("/api/session")
   .then(async (s) => {
-    state.csrf = s.csrf;
+    useSession(s);
     await load();
     navigate(location.hash.slice(1) || "overview");
   })

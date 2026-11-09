@@ -19,6 +19,37 @@ def test_auth_and_csrf(tmp_path):
         assert c.get('/api/health').status_code==200
         assert c.post('/api/login',json={'password':'wrong'}).status_code==401
 
+def test_no_sign_in_mode_keeps_csrf_and_password(tmp_path):
+    app=create_app(tmp_path,background=False,auth_required=False)
+    original_password=app.state.store.get('password')
+    with TestClient(app) as c:
+        assert c.get('/api/config').status_code==200
+        session=c.get('/api/session').json()
+        assert session['auth_required'] is False and session['csrf']
+        assert not c.cookies
+        doc=c.get('/api/config').json();doc['configuration']['markup_percent']=7
+        assert c.put('/api/config',json=doc).status_code==403
+        c.headers['X-CSRF-Token']=session['csrf']
+        assert c.put('/api/config',json=doc,headers={'Origin':'https://untrusted.invalid'}).status_code==403
+        assert c.put('/api/config',json=doc).status_code==200
+        assert c.get('/api/config').json()['configuration']['markup_percent']==7
+        assert c.post('/api/password',json={'current_password':'unused','new_password':'a-new-synthetic-password'}).status_code==409
+        assert app.state.store.get('password')==original_password
+
+def test_auth_can_be_restored_after_environment_override(tmp_path,monkeypatch):
+    monkeypatch.setenv('METERING_AUTH_DISABLED','1')
+    app=create_app(tmp_path,background=False)
+    password=(tmp_path/'initial-access.txt').read_text().split('Password: ')[1].splitlines()[0]
+    with TestClient(app) as c:
+        assert c.get('/api/session').json()['auth_required'] is False
+        assert c.get('/api/config').status_code==200
+    monkeypatch.delenv('METERING_AUTH_DISABLED')
+    with TestClient(create_app(tmp_path,background=False)) as c:
+        assert c.get('/api/config').status_code==401
+        result=c.post('/api/login',json={'password':password})
+        assert result.status_code==200 and result.json()['auth_required'] is True
+        assert c.get('/api/config').status_code==200
+
 def test_config_concurrency_and_validation(session):
     c,app,p=session
     doc=c.get('/api/config').json();doc['configuration']['markup_percent']=12

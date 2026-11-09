@@ -30,6 +30,8 @@ python3 -m venv .venv
 
 Open <http://127.0.0.1:8095>. On first startup the service generates an administrator password in `~/.local/share/metering-dashboard/initial-access.txt` (mode 0600). Sign in with that password, then change it in Settings. The initial file is removed after a password change.
 
+To temporarily open the dashboard without sign-in, start it with `METERING_AUTH_DISABLED=1`. Anyone who can reach it can then view and edit the workspace. The existing administrator password is preserved; remove this environment variable and restart to require sign-in again. CSRF and same-origin checks stay enabled. See [operations](docs/operations.md#temporary-access-without-sign-in) for systemd configuration.
+
 The default listener is loopback. To serve a trusted LAN, choose the interface with `--host`, and use an independent port. Use TLS through a reverse proxy or a private tunnel when needed; this app does not change an existing web server. `--data-dir` or `METERING_DATA_DIR` selects a different **private directory outside the checkout**.
 
 ## Install on a Raspberry Pi / Linux host

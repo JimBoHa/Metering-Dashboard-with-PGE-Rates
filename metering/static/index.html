@@ -13,7 +13,7 @@
     <script src="/static/sql.js" defer></script>
   </head>
   <body>
-    <div id="login-view" class="login-shell">
+    <div id="login-view" class="login-shell" hidden>
       <form id="login-form" class="login-card">
         <div class="brand-icon">m<span>↗</span></div>
         <p class="eyebrow">UTILITY INTELLIGENCE</p>
@@ -384,8 +384,11 @@
                       required /></label
                   ><button class="primary full">Save settings</button>
                 </form>
+                <p id="auth-disabled" class="form-help" hidden>
+                  Sign-in is disabled for this workspace.
+                </p>
               </article>
-              <article class="panel">
+              <article id="password-panel" class="panel">
                 <h2>Change administrator password</h2>
                 <form id="password-form" class="form-grid">
                   <label class="full"

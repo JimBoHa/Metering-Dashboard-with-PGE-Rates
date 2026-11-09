@@ -5,6 +5,7 @@ import csv
 import io
 import json
 import os
+import secrets
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -40,9 +41,13 @@ class PasswordChange(BaseModel):
     new_password:str=Field(min_length=12,max_length=1000)
 
 
-def create_app(directory=None,background=True,sql_connector=None):
+def create_app(directory=None,background=True,sql_connector=None,auth_required=None):
     directory=directory or os.environ.get("METERING_DATA_DIR",str(Path.home()/".local/share/metering-dashboard"))
+    if auth_required is None:auth_required=os.environ.get("METERING_AUTH_DISABLED","").strip().lower() not in {"1","true","yes"}
     store=Store(directory);security=Security(store);collector=Acquisition(store)
+    open_session={"csrf":secrets.token_urlsafe(24)}
+    def active_session(request):return security.session(request.cookies.get(COOKIE)) if auth_required else open_session
+    def session_info(session):return {"username":"admin","csrf":session["csrf"],"auth_required":auth_required}
     vault=SqlSecrets(store);sql=SqlTrends(store,vault,sql_connector)
     jobs={};job_tasks={}
     async def rates_loop():
@@ -64,7 +69,7 @@ def create_app(directory=None,background=True,sql_connector=None):
         await sql.close()
         collector.close();store.close()
     app=FastAPI(title="Metering Dashboard",lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None)
-    app.state.store=store;app.state.collector=collector;app.state.sql=sql
+    app.state.store=store;app.state.collector=collector;app.state.sql=sql;app.state.auth_required=auth_required
     @app.exception_handler(RequestValidationError)
     async def validation_error(request,error):
         return JSONResponse({"detail":[{k:e[k] for k in ("loc","msg","type") if k in e} for e in error.errors()]},422)
@@ -73,9 +78,9 @@ def create_app(directory=None,background=True,sql_connector=None):
         path=request.url.path
         headers={"X-Content-Type-Options":"nosniff","Referrer-Policy":"same-origin","Content-Security-Policy":"default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'","Cache-Control":"no-store"}
         if path.startswith("/api/") and path not in {"/api/login","/api/health"}:
-            session=security.session(request.cookies.get(COOKIE))
+            session=active_session(request)
             if not session:return JSONResponse({"detail":"Sign in to continue"},401,headers=headers)
-            if request.method not in {"GET","HEAD"} and request.headers.get("x-csrf-token")!=session["csrf"]:return JSONResponse({"detail":"Session verification failed; sign in again"},403,headers=headers)
+            if request.method not in {"GET","HEAD"} and request.headers.get("x-csrf-token")!=session["csrf"]:return JSONResponse({"detail":"Request verification failed; reload the dashboard"},403,headers=headers)
         if request.method not in {"GET","HEAD","OPTIONS"}:
             origin=request.headers.get("origin")
             if origin and urlparse(origin).netloc!=request.headers.get("host"):return JSONResponse({"detail":"Cross-origin request rejected"},403,headers=headers)
@@ -87,19 +92,21 @@ def create_app(directory=None,background=True,sql_connector=None):
     def health():return {"service":"metering-dashboard","status":"running","version":__version__}
     @app.post("/api/login")
     def login(body:Login,request:Request,response:Response):
+        if not auth_required:return session_info(open_session)
         try:result=security.login(body.password,request.client.host)
         except ValueError as e:raise HTTPException(429,str(e))
         if not result:raise HTTPException(401,"Incorrect password")
         token,csrf=result
         response.set_cookie(COOKIE,token,httponly=True,samesite="strict",secure=request.url.scheme=="https",max_age=8*3600)
-        return {"csrf":csrf,"username":"admin"}
+        return session_info({"csrf":csrf})
     @app.get("/api/session")
-    def session(request:Request):return {"username":"admin","csrf":security.session(request.cookies.get(COOKIE))["csrf"]}
+    def session(request:Request):return session_info(active_session(request))
     @app.post("/api/logout")
     def logout(request:Request,response:Response):
         security.sessions.pop(request.cookies.get(COOKIE),None);response.delete_cookie(COOKIE);return {"ok":True}
     @app.post("/api/password")
     def change_password(body:PasswordChange):
+        if not auth_required:raise HTTPException(409,"Password changes are unavailable while sign-in is disabled")
         if not verify(body.current_password,store.get("password")):raise HTTPException(400,"Current password is incorrect")
         store.set("password",password_hash(body.new_password));security.sessions.clear()
         (store.directory/"initial-access.txt").unlink(missing_ok=True)
