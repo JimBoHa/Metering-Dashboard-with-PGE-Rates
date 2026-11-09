@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Metering · Utility accounting</title>
+    <meta
+      name="description"
+      content="Utility metering, time-of-use rates and transparent cost allocation."
+    />
+    <link rel="stylesheet" href="/static/style.css" />
+    <script src="/static/app.js" defer></script>
+  </head>
+  <body>
+    <div id="login-view" class="login-shell">
+      <form id="login-form" class="login-card">
+        <div class="brand-icon">m<span>↗</span></div>
+        <p class="eyebrow">UTILITY INTELLIGENCE</p>
+        <h1>Every unit.<br />Accounted for.</h1>
+        <p class="muted">Sign in to your private metering workspace.</p>
+        <label
+          >Administrator password<input
+            id="login-password"
+            type="password"
+            required
+            autocomplete="current-password" /></label
+        ><button class="primary" type="submit">
+          Open dashboard <span>↗</span>
+        </button>
+        <p id="login-error" role="alert"></p>
+        <small
+          >First login: use the password in the server's private<br /><code
+            >initial-access.txt</code
+          >
+          file.</small
+        >
+      </form>
+      <div class="login-art" aria-hidden="true">
+        <span class="orb orb-one"></span><span class="orb orb-two"></span>
+        <div class="art-label">
+          <span class="live-dot"></span> A clearer picture of your utilities
+        </div>
+        <svg viewBox="0 0 700 250">
+          <path
+            d="M0 200 H90 V145 H150 V170 H220 V90 H300 V120 H370 V60 H440 V100 H520 V30 H600 V65 H700"
+          />
+        </svg>
+      </div>
+    </div>
+    <div id="app-view" hidden>
+      <aside class="sidebar">
+        <a class="brand" href="#overview"
+          ><span class="brand-icon">m<span>↗</span></span
+          ><span
+            >metering<span class="brand-sub">UTILITY WORKSPACE</span></span
+          ></a
+        >
+        <div class="nav-label">WORKSPACE</div>
+        <nav aria-label="Main navigation">
+          <button data-page="overview" class="nav active">
+            <span>◫</span> Overview</button
+          ><button data-page="meters" class="nav">
+            <span>◉</span> Meter inventory</button
+          ><button data-page="canvas" class="nav">
+            <span>⌘</span> Calculation canvas</button
+          ><button data-page="rates" class="nav">
+            <span>◷</span> PG&E rates</button
+          ><button data-page="expenses" class="nav">
+            <span>▤</span> Bills & allocation</button
+          ><button data-page="discovery" class="nav">
+            <span>⌁</span> Sources & discovery</button
+          ><button data-page="settings" class="nav">
+            <span>⚙</span> Settings
+          </button>
+        </nav>
+        <div class="sidebar-bottom">
+          <div class="status-light">
+            <span class="live-dot"></span>
+            <div>Private network<span>Read-only meter collection</span></div>
+          </div>
+          <button id="logout" class="text-button">Sign out ↗</button>
+        </div>
+      </aside>
+      <div class="main-shell">
+        <header class="topbar">
+          <span id="breadcrumb">Workspace <span>/ Overview</span></span>
+          <div class="topbar-right">
+            <span class="timezone">America/Los_Angeles</span
+            ><span class="avatar">A</span>
+          </div>
+        </header>
+        <main>
+          <div class="page-header">
+            <div>
+              <p class="eyebrow" id="page-eyebrow">THE BIG PICTURE</p>
+              <h1 id="page-title">Utility overview</h1>
+              <p class="muted" id="page-description">
+                One workspace for every meter, system and shared cost.
+              </p>
+            </div>
+            <button id="refresh-all" class="secondary">
+              ↻ Refresh readings
+            </button>
+          </div>
+          <section id="page-overview" class="page">
+            <div class="period-bar">
+              <span
+                ><span class="live-dot"></span>
+                <span id="last-updated">Waiting for meter data</span></span
+              >
+              <div class="date-group">
+                <label>From <input type="date" id="report-start" /></label
+                ><span>→</span
+                ><label
+                  >To (exclusive) <input type="date" id="report-end" /></label
+                ><button id="run-report" class="secondary small">Apply</button>
+              </div>
+            </div>
+            <div class="stats-grid" id="overview-stats"></div>
+            <div class="overview-grid">
+              <article class="panel consumption">
+                <div class="panel-heading">
+                  <div>
+                    <p class="eyebrow">CONSUMPTION</p>
+                    <h2>Recorded meter values</h2>
+                  </div>
+                  <select id="chart-meter" aria-label="Meter to chart"></select>
+                </div>
+                <div id="usage-chart" class="chart-box"></div>
+                <div class="chart-footer">
+                  <span class="legend-dot"></span
+                  ><span id="chart-caption"
+                    >Select a meter to see recorded readings</span
+                  >
+                </div>
+              </article>
+              <article class="panel system-panel">
+                <div class="panel-heading">
+                  <div>
+                    <p class="eyebrow">COST BREAKDOWN</p>
+                    <h2>By system</h2>
+                  </div>
+                  <span>↗</span>
+                </div>
+                <div id="system-breakdown"></div>
+              </article>
+            </div>
+            <article class="panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">BILLING WORKSHEET</p>
+                  <h2>Meter usage & allocated costs</h2>
+                </div>
+                <a id="export-report" class="secondary small" href="#"
+                  >↓ Export CSV</a
+                >
+              </div>
+              <div id="report-notes"></div>
+              <div class="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Meter / system</th>
+                      <th>Usage</th>
+                      <th>Coverage</th>
+                      <th>Base cost</th>
+                      <th>Markup</th>
+                      <th>Total</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="report-rows"></tbody>
+                </table>
+              </div>
+            </article>
+          </section>
+          <section id="page-meters" class="page" hidden>
+            <div class="toolbar">
+              <input
+                id="meter-search"
+                type="search"
+                placeholder="Search meter names or systems…"
+                aria-label="Search meters"
+              />
+              <div>
+                <button id="import-readings" class="secondary">
+                  ↑ Import readings</button
+                ><button id="new-meter" class="primary">＋ Add meter</button>
+              </div>
+            </div>
+            <div id="meter-grid" class="meter-grid"></div>
+          </section>
+          <section id="page-canvas" class="page" hidden>
+            <div class="toolbar">
+              <p class="muted">
+                Drag cards to arrange your system. Add signed inputs to create a
+                net meter.
+              </p>
+              <div>
+                <button id="canvas-reset" class="secondary">
+                  Arrange cards</button
+                ><button id="new-formula" class="primary">＋ Net meter</button>
+              </div>
+            </div>
+            <div class="canvas-legend">
+              <span class="legend-dot"></span> Meter input
+              <span class="legend-dot violet"></span> Calculated meter
+              <span>Example: supply × 1 + return × −1 = net usage</span>
+            </div>
+            <div class="canvas-viewport">
+              <div id="meter-canvas" class="meter-canvas">
+                <svg id="canvas-lines" aria-hidden="true"></svg>
+                <div id="canvas-nodes"></div>
+              </div>
+            </div>
+            <p class="muted small-note">
+              Positions save automatically. Formulas use matching units and
+              aligned, verified time intervals. Set billing only on the intended
+              net meter.
+            </p>
+          </section>
+          <section id="page-rates" class="page" hidden>
+            <div class="split-grid">
+              <article class="panel">
+                <div class="panel-heading">
+                  <div>
+                    <p class="eyebrow">OFFICIAL TARIFF IMPORT</p>
+                    <h2>Your PG&E service</h2>
+                  </div>
+                  <span class="tag">Runtime fetch</span>
+                </div>
+                <form id="rate-form" class="form-grid">
+                  <label class="full"
+                    >Rate schedule on your bill<input
+                      id="rate-schedule"
+                      placeholder="Enter a schedule, e.g. B-19"
+                      required /></label
+                  ><label
+                    >Schedule option<select id="rate-option">
+                      <option value="base">Standard / base</option>
+                      <option value="R">Option R</option>
+                      <option value="S">Option S</option>
+                    </select></label
+                  ><label
+                    >Service voltage<select id="rate-voltage">
+                      <option value="secondary">Secondary</option>
+                      <option value="primary">Primary</option>
+                      <option value="transmission">Transmission</option>
+                    </select></label
+                  ><label
+                    >Electricity service<select id="rate-service">
+                      <option value="bundled">Bundled PG&E</option>
+                      <option value="delivery">Delivery only / CCA</option>
+                    </select></label
+                  ><label
+                    >B-19 customer class<select id="rate-class">
+                      <option value="mandatory">Mandatory</option>
+                      <option value="voluntary">Voluntary</option>
+                    </select></label
+                  ><label
+                    >B-6 phase<select id="rate-phase">
+                      <option value="poly">Polyphase</option>
+                      <option value="single">Single phase</option>
+                    </select></label
+                  ><label
+                    >Global price markup (%)<input
+                      id="rate-markup"
+                      type="number"
+                      min="0"
+                      max="1000"
+                      step="0.01"
+                  /></label>
+                  <p class="form-help full">
+                    Enter the exact service details from your bill. Automatic
+                    import supports B-6, B-19 and B-20, including R/S options
+                    where applicable. Bundled workbooks cannot establish
+                    delivery-only prices. All rates and source files stay in
+                    private runtime storage.
+                  </p>
+                  <button class="primary full" type="submit">
+                    Validate selection & fetch latest rates ↗
+                  </button>
+                </form>
+              </article>
+              <article class="panel">
+                <div class="panel-heading">
+                  <div>
+                    <p class="eyebrow">SOURCE & EFFECTIVE DATES</p>
+                    <h2>Rate library</h2>
+                  </div>
+                </div>
+                <div id="rate-status"></div>
+                <div id="rate-library"></div>
+                <p class="form-help">
+                  The service checks for updates daily. Existing versions stay
+                  available for their effective dates. Unpriced usage remains
+                  visible. Demand and daily charges need a complete calendar
+                  month; taxes, special riders and account-specific adjustments
+                  are entered as bills.
+                </p>
+                <a
+                  class="inline-link"
+                  href="https://www.pge.com/tariffs/en/rate-information/electric-rates.html"
+                  target="_blank"
+                  rel="noreferrer"
+                  >View PG&E published schedules ↗</a
+                >
+              </article>
+            </div>
+          </section>
+          <section id="page-expenses" class="page" hidden>
+            <div class="toolbar">
+              <p class="muted">
+                Record dated bills for water, chemicals, fuel or other shared
+                costs.
+              </p>
+              <button id="new-expense" class="primary">＋ Add bill</button>
+            </div>
+            <div class="info-strip">
+              Each bill is divided by weighted usage over its billing period.
+              Shares reconcile to the bill's exact total, to the cent.
+            </div>
+            <div id="expense-list"></div>
+          </section>
+          <section id="page-discovery" class="page" hidden>
+            <div class="toolbar">
+              <p class="muted">
+                Connect BACnet/IP, Modbus TCP, HTTP JSON or an existing local
+                sample store.
+              </p>
+              <button id="new-source" class="primary">＋ Add source</button>
+            </div>
+            <div id="source-list"></div>
+            <article class="panel" id="discovery-results" hidden>
+              <div class="panel-heading">
+                <div>
+                  <p class="eyebrow">NETWORK INVENTORY</p>
+                  <h2 id="discovery-heading">Discovery results</h2>
+                </div>
+                <input
+                  id="point-filter"
+                  type="search"
+                  placeholder="Filter this page of points…"
+                  aria-label="Filter discovered points"
+                />
+              </div>
+              <div id="discovery-body"></div>
+            </article>
+          </section>
+          <section id="page-settings" class="page" hidden>
+            <div class="split-grid">
+              <article class="panel">
+                <h2>Workspace settings</h2>
+                <form id="settings-form" class="form-grid">
+                  <label class="full"
+                    >Billing timezone<input
+                      id="setting-timezone"
+                      required /></label
+                  ><label
+                    >Poll interval (seconds)<input
+                      id="setting-poll"
+                      type="number"
+                      min="30"
+                      max="3600"
+                      required /></label
+                  ><label
+                    >Global markup (%)<input
+                      id="setting-markup"
+                      type="number"
+                      min="0"
+                      max="1000"
+                      step="0.01"
+                      required /></label
+                  ><button class="primary full">Save settings</button>
+                </form>
+              </article>
+              <article class="panel">
+                <h2>Change administrator password</h2>
+                <form id="password-form" class="form-grid">
+                  <label class="full"
+                    >Current password<input
+                      id="current-password"
+                      type="password"
+                      required
+                      autocomplete="current-password" /></label
+                  ><label class="full"
+                    >New password (12 characters or more)<input
+                      id="new-password"
+                      type="password"
+                      minlength="12"
+                      required
+                      autocomplete="new-password" /></label
+                  ><button class="secondary full">Update password</button>
+                </form>
+                <p class="form-help">
+                  Changing the password signs out all sessions. Keep the
+                  dashboard on a trusted LAN or use an SSH tunnel / TLS reverse
+                  proxy.
+                </p>
+              </article>
+            </div>
+            <article class="panel">
+              <h2>Recent activity</h2>
+              <div id="audit-list"></div>
+            </article>
+          </section>
+        </main>
+        <footer>
+          <span
+            >METERING
+            <span class="muted">/ Utility accounting workspace</span></span
+          ><span class="muted">Data stays on your network</span>
+        </footer>
+      </div>
+    </div>
+    <dialog id="editor">
+      <div class="dialog-heading">
+        <h2 id="editor-title"></h2>
+        <button id="close-editor" class="icon-button" aria-label="Close dialog">
+          ×
+        </button>
+      </div>
+      <div id="editor-body"></div>
+    </dialog>
+    <div id="toast" role="status" hidden></div>
+  </body>
+</html>
